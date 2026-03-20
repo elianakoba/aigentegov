@@ -27,18 +27,19 @@ ProximaAcaoConsultaCidadaoAtendimento = Literal[
 
 class ConsultarCidadaoAtendimentoRequest(BaseModel):
     """
-    Payload da API de consulta de cidadão para atendimento.
+    Payload da API de consulta do cidadão para atendimento.
 
-    Esta API é responsável por:
+    Objetivo:
     - localizar o cidadão por prontuário GAPD ou telefone;
     - consultar dados básicos do cidadão para apoio ao atendimento;
     - validar continuidade do atendimento, quando essa for a intenção;
-    - retornar as informações necessárias ao agente para o próximo passo.
+    - retornar as informações necessárias para orientar o próximo passo do agente.
 
-    Regras:
-    - informar pelo menos um identificador: prontuariogapd OU telefone;
-    - quando a intenção for VALIDAR_CONTINUIDADE_ATENDIMENTO,
-      o campo servicoespecializado deve ser informado.
+    Regras de preenchimento:
+    - é obrigatório informar pelo menos um identificador:
+      prontuariogapd OU telefone;
+    - quando a intencao for VALIDAR_CONTINUIDADE_ATENDIMENTO,
+      o campo servicoespecializado torna-se obrigatório.
     """
 
     model_config = ConfigDict(
@@ -62,21 +63,31 @@ class ConsultarCidadaoAtendimentoRequest(BaseModel):
     prontuariogapd: Optional[str] = Field(
         default=None,
         title="Prontuário GAPD",
-        description="Prontuário do cidadão no GAPD. Informe este campo ou o telefone.",
+        description=(
+            "Prontuário do cidadão no GAPD. "
+            "Informe este campo ou o telefone."
+        ),
         examples=["123456"]
     )
 
     telefone: Optional[str] = Field(
         default=None,
         title="Telefone",
-        description="Telefone do cidadão, preferencialmente o número do WhatsApp. Informe este campo ou o prontuariogapd.",
+        description=(
+            "Telefone do cidadão, preferencialmente o número do WhatsApp. "
+            "Informe este campo ou o prontuariogapd."
+        ),
         examples=["(11) 99999-8888"]
     )
 
     intencao: IntencaoConsultaCidadaoAtendimento = Field(
         ...,
         title="Intenção da consulta",
-        description="Objetivo da consulta para direcionar o comportamento da API."
+        description=(
+            "Objetivo da consulta, que direciona o comportamento da API. "
+            "Valores aceitos: CONSULTAR_DADOS_CIDADAO ou VALIDAR_CONTINUIDADE_ATENDIMENTO."
+        ),
+        examples=["CONSULTAR_DADOS_CIDADAO"]
     )
 
     servicoespecializado: Optional[str] = Field(
@@ -84,7 +95,7 @@ class ConsultarCidadaoAtendimentoRequest(BaseModel):
         title="Serviço especializado",
         description=(
             "Serviço para o qual se deseja validar a continuidade do atendimento. "
-            "Obrigatório quando a intenção for VALIDAR_CONTINUIDADE_ATENDIMENTO."
+            "Obrigatório somente quando a intencao for VALIDAR_CONTINUIDADE_ATENDIMENTO."
         ),
         examples=["FISIOTERAPIA", "TRANSPORTE"]
     )
@@ -131,7 +142,7 @@ class DadosRetornoConsultarCidadaoAtendimentoResponse(BaseModel):
 
     intencao: Optional[IntencaoConsultaCidadaoAtendimento] = Field(
         default=None,
-        description="Intenção da consulta recebida."
+        description="Intenção de consulta recebida na requisição."
     )
 
     servicoespecializado: Optional[str] = Field(
@@ -146,7 +157,10 @@ class DadosRetornoConsultarCidadaoAtendimentoResponse(BaseModel):
 
     continuidade_atendimento: Optional[bool] = Field(
         default=None,
-        description="Indica se há continuidade possível no atendimento, quando aplicável."
+        description=(
+            "Indica se há continuidade possível no atendimento, "
+            "quando a intenção for VALIDAR_CONTINUIDADE_ATENDIMENTO."
+        )
     )
 
     id_notificacao_base: Optional[int] = Field(
@@ -156,7 +170,7 @@ class DadosRetornoConsultarCidadaoAtendimentoResponse(BaseModel):
 
     tipoagenda: Optional[str] = Field(
         default=None,
-        description="Tipo de agenda associado ao registro-base encontrado."
+        description="Tipo de agenda associado ao registro-base encontrado, quando aplicável."
     )
 
     ultimo_servicoespecializado: Optional[str] = Field(
@@ -176,7 +190,10 @@ class DadosRetornoConsultarCidadaoAtendimentoResponse(BaseModel):
 
     campos_pendentes: Optional[List[str]] = Field(
         default=None,
-        description="Campos mínimos faltantes para executar a consulta."
+        description=(
+            "Lista de campos obrigatórios faltantes para executar a consulta. "
+            "Exemplo: ['servicoespecializado'] quando a intenção exigir esse campo."
+        )
     )
 
     @field_validator("prontuariogapd", mode="before")
@@ -195,7 +212,13 @@ class ConsultarCidadaoAtendimentoResponse(BaseModel):
 
     proxima_acao: ProximaAcaoConsultaCidadaoAtendimento = Field(
         ...,
-        description="Orienta explicitamente o próximo passo do agente."
+        description=(
+            "Orienta explicitamente o próximo passo do agente.\n"
+            "- EXIBIR_DADOS_CIDADAO: cidadão localizado e dados disponíveis para consulta.\n"
+            "- PROSSEGUIR_ATENDIMENTO: continuidade de atendimento validada com sucesso.\n"
+            "- INFORMAR_DADOS_OBRIGATORIOS: faltam campos para processar a intenção informada.\n"
+            "- ENCAMINHAR_ATENDENTE_HUMANO: não foi possível automatizar a continuidade do atendimento."
+        )
     )
 
     mensagem: str = Field(

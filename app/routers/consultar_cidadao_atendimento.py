@@ -39,37 +39,103 @@ def normalizar_texto(valor):
     summary="Consultar cidadão para atendimento",
     description=(
         "API responsável por localizar o cidadão por prontuário GAPD ou telefone "
-        "e retornar informações para apoio ao atendimento. "
-        "O comportamento da consulta é direcionado pela intenção informada no payload."
-        "\n\n"
-        "Intenções atualmente suportadas:"
-        "\n"
-        "1. CONSULTAR_DADOS_CIDADAO"
-        "\n"
-        "2. VALIDAR_CONTINUIDADE_ATENDIMENTO"
-    )
+        "e retornar informações para apoio ao atendimento.\n\n"
+
+        "Campos obrigatórios gerais:\n"
+        "- informar pelo menos um identificador: prontuariogapd ou telefone;\n"
+        "- informar a intencao da consulta.\n\n"
+
+        "Intenções suportadas:\n\n"
+
+        "1. CONSULTAR_DADOS_CIDADAO\n"
+        "   - Objetivo: localizar o cidadão e retornar dados básicos e informações gerais de apoio ao atendimento.\n"
+        "   - Campos obrigatórios: intencao + (prontuariogapd ou telefone).\n"
+        "   - Campo servicoespecializado: não obrigatório.\n\n"
+
+        "2. VALIDAR_CONTINUIDADE_ATENDIMENTO\n"
+        "   - Objetivo: verificar se existe histórico suficiente para continuidade do agendamento automático.\n"
+        "   - Campos obrigatórios: intencao + (prontuariogapd ou telefone) + servicoespecializado.\n\n"
+
+        "Interpretação do campo proxima_acao:\n"
+        "- EXIBIR_DADOS_CIDADAO: cidadão localizado e dados disponíveis para consulta.\n"
+        "- PROSSEGUIR_ATENDIMENTO: continuidade validada com sucesso.\n"
+        "- INFORMAR_DADOS_OBRIGATORIOS: faltam campos para processar a intenção informada.\n"
+        "- ENCAMINHAR_ATENDENTE_HUMANO: não foi possível automatizar a continuidade do atendimento para agendamento."
+    ),
+    responses={
+        200: {
+            "description": "Resposta funcional da consulta do cidadão para atendimento."
+        },
+        401: {
+            "description": "API key ausente ou inválida."
+        },
+        422: {
+            "description": "Payload inválido."
+        }
+    }
 )
 def consultar_cidadao_atendimento(
     payload: ConsultarCidadaoAtendimentoRequest = Body(
         ...,
         openapi_examples={
-            "consultar_dados_cidadao": {
-                "summary": "Consultar dados do cidadão",
-                "description": "Use quando o objetivo for localizar o cidadão e obter seus dados básicos para apoio ao atendimento.",
+            "consultar_dados_por_telefone": {
+                "summary": "Consultar dados do cidadão por telefone",
+                "description": (
+                    "Use quando o objetivo for localizar o cidadão e obter seus dados "
+                    "básicos para apoio ao atendimento."
+                ),
                 "value": {
                     "telefone": "(11) 99999-8888",
                     "intencao": "CONSULTAR_DADOS_CIDADAO",
                     "canal_origem": "whatsapp"
                 }
             },
-            "validar_continuidade_atendimento": {
+            "consultar_dados_por_prontuario": {
+                "summary": "Consultar dados do cidadão por prontuário",
+                "description": (
+                    "Use quando o prontuário GAPD estiver disponível e o objetivo for "
+                    "consultar informações básicas do cidadão."
+                ),
+                "value": {
+                    "prontuariogapd": "123456",
+                    "intencao": "CONSULTAR_DADOS_CIDADAO",
+                    "canal_origem": "atendente"
+                }
+            },
+            "validar_continuidade_sucesso": {
                 "summary": "Validar continuidade do atendimento",
-                "description": "Use quando o objetivo for verificar se há continuidade possível para um determinado serviço.",
+                "description": (
+                    "Use quando for necessário verificar se existe histórico suficiente "
+                    "para continuidade automática de atendimento de um serviço específico."
+                ),
                 "value": {
                     "prontuariogapd": "123456",
                     "servicoespecializado": "FISIOTERAPIA",
                     "intencao": "VALIDAR_CONTINUIDADE_ATENDIMENTO",
                     "canal_origem": "whatsapp"
+                }
+            },
+            "validar_continuidade_sem_servico": {
+                "summary": "Exemplo inválido: falta servicoespecializado",
+                "description": (
+                    "Quando a intencao for VALIDAR_CONTINUIDADE_ATENDIMENTO, "
+                    "o campo servicoespecializado deve ser enviado."
+                ),
+                "value": {
+                    "telefone": "(11) 99999-8888",
+                    "intencao": "VALIDAR_CONTINUIDADE_ATENDIMENTO",
+                    "canal_origem": "whatsapp"
+                }
+            },
+            "consulta_sem_identificador": {
+                "summary": "Exemplo inválido: falta identificador",
+                "description": (
+                    "É obrigatório informar pelo menos um identificador: "
+                    "prontuariogapd ou telefone."
+                ),
+                "value": {
+                    "intencao": "CONSULTAR_DADOS_CIDADAO",
+                    "canal_origem": "web"
                 }
             }
         }
