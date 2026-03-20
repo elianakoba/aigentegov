@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+
+  <h2 style="margin-top:0; color: var(--verde-primario);">
+    Consultar agendas
+  </h2>
+
+  <form method="get" action="/agendas"
+        style="display:flex; flex-wrap:wrap; gap:14px; margin:16px 0; align-items:end;">
+
+    <div>
+      <label>ID da pessoa</label><br>
+      <input class="input" type="number" name="id_pessoaagenteia"
+             value="{{ id_pessoaagenteia or '' }}">
+    </div>
+
+    <div>
+      <label>Serviço especializado</label><br>
+      <select class="input" name="id_servicoespecializado">
+        <option value="">Todos</option>
+        {% for s in especialidades %}
+          <option value="{{ s[0] }}"
+            {{ 'selected' if s[0]|string == id_servicoespecializado|string else '' }}>
+            {{ s[1] }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div>
+      <label>Profissional</label><br>
+      <select class="input" name="id_profissional">
+        <option value="">Todos</option>
+        {% for p in profissionais %}
+          <option value="{{ p[0] }}"
+            {{ 'selected' if p[0]|string == id_profissional|string else '' }}>
+            {{ p[1] }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div>
+      <label>Unidade</label><br>
+      <select class="input" name="id_departamento">
+        <option value="">Todas</option>
+        {% for u in unidades %}
+          <option value="{{ u[0] }}"
+            {{ 'selected' if u[0]|string == id_departamento|string else '' }}>
+            {{ u[1] }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div>
+      <button class="btn btn-primary" type="submit">Pesquisar</button>
+    </div>
+
+  </form>
+
+  {% if registros %}
+    <table class="table">
+      <tr>
+        <th>ID</th>
+        <th>Data</th>
+        <th>Hora</th>
+        <th>Serviço</th>
+        <th>Profissional</th>
+        <th>Unidade</th>
+        <th>Situação</th>
+      </tr>
+      {% for r in registros %}
+      <tr>
+        <td>{{ r[0] }}</td>
+        <td>{{ r[1].strftime('%d/%m/%Y') }}</td>
+        <td>{{ r[2] }}</td>
+        <td>{{ r[3] }}</td>
+        <td>{{ r[4] }}</td>
+        <td>{{ r[5] }}</td>
+        <td>{{ r[6] or '-' }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  {% endif %}
+
+</div>
+
+{% endblock %}

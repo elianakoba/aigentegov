@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+
+  <div class="card">
+
+    <!-- Título -->
+    <h2 style="margin-top:0; color: var(--verde-primario);">
+      Bem-vinda(o), {{ user_email }}
+    </h2>
+
+    <!-- Texto contextual -->
+    <p style="color: var(--cinza-texto); ">
+      Este é o ambiente de gestão de agendamentos.
+      Aqui você pode consultar, acompanhar e organizar os atendimentos registrados no sistema.
+    </p>
+
+    <!-- Ação principal
+    <div style="margin-top:16px;">
+      <a href="/agendas" class="btn btn-primary">
+        Consultar agendas
+      </a>
+    </div> -->
+
+  </div>
+
+{% endblock %}

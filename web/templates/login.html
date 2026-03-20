@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Login | AiGENTEGOV</title>
+
+  <link rel="stylesheet" href="/static/css/admin.css">
+</head>
+
+<body class="login-page">
+
+  <div class="login-box">
+
+    <!-- Header / Marca -->
+    <div class="brand" style="justify-content:center; margin-bottom: 14px;">
+      <img src="/static/img/LogoAiGenteGov_SemSlogan.png" alt="AiGENTEGOV">
+    </div>
+
+    <!-- Título -->
+    <div style="text-align:center; margin-bottom: 16px;">
+      <h2 style="margin:0; color: var(--verde-primario);">Acesso ao sistema</h2>
+      <p style="margin:4px 0 0; font-size:14px; color: var(--cinza-texto);">
+        Informe seus dados para continuar
+      </p>
+    </div>
+
+    {% if error %}
+      <div class="error" style="text-align:center;">
+        {{ error }}
+      </div>
+    {% endif %}
+
+    <!-- Formulário -->
+    <form method="post" action="/login" style="display:flex; flex-direction:column; gap:12px;">
+
+      <input
+        class="input"
+        name="email"
+        type="email"
+        required
+        placeholder="E-mail"
+        style="width:100%;"
+      >
+
+      <input
+        class="input"
+        name="senha"
+        type="password"
+        required
+        placeholder="Senha"
+        style="width:100%;"
+      >
+
+      <!-- Ações auxiliares -->
+      <div style="display:flex; justify-content:flex-end;">
+        <a href="/esqueci-senha"
+           style="font-size:13px; color: var(--verde-secundario); text-decoration:none;">
+          Esqueci minha senha
+        </a>
+      </div>
+
+      <button class="btn btn-primary" type="submit" style="width:100%; margin-top:6px;">
+        Entrar
+      </button>
+
+    </form>
+
+    <!-- Rodapé -->
+    <div style="text-align:center; margin-top:14px; font-size:12px; color:#6b7280;">
+      © 2026 AiGENTEGOV
+    </div>
+
+  </div>
+
+</body>
+</html>
