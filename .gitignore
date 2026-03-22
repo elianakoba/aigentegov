@@ -1,0 +1,31 @@
+# Python compilado
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ambientes virtuais
+.venv/
+venv/
+env/
+
+# Variáveis de ambiente
+.env
+.env.*
+*.env
+
+# Logs
+*.log
+
+# Ferramentas e cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# IDEs e editores
+.vscode/
+.idea/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
