@@ -1,99 +1,222 @@
-from typing import Optional, Literal
-from pydantic import BaseModel, Field
-from datetime import datetime
+from typing import List, Literal, Optional
+from datetime import date, datetime
+from pydantic import BaseModel, Field, ConfigDict
 
 
+# ==========================================================
+# TIPOS FIXOS
+# ==========================================================
 
-StatusAgendamento = Literal[
+TipoAgenda = Literal["evento_variavel", "slot_fixo"]
+CanalOrigem = Literal["whatsapp", "web", "atendente"]
+
+StatusAgenda = Literal[
     "SOLICITADO",
-    "CONFIRMADO",
-    "CANCELADO",
-    "REAGENDADO",
+    "AUTORIZADO",
+    "AGENDADO",
     "CONCLUIDO",
-    "NAO_PERMITE_IA",
-    "ENCAMINHADO_HUMANO",
+    "NEGADO",
+    "CANCELADO"
 ]
 
-TipoAgendamento = Literal["FIXO", "VARIAVEL"]
-PeriodoPreferencial = Optional[Literal["MANHA", "TARDE", "NOITE"]]
+ProximaAcao = Literal[
+    "AGENDAMENTO_REGISTRADO",
+    "AGENDAMENTO_REALIZADO",
+    "SELECIONAR_OPCAO_DISPONIVEL",
+    "INFORMAR_DADOS_OBRIGATORIOS",
+    "SEM_DISPONIBILIDADE",
+    "ENCAMINHAR_ATENDENTE_HUMANO"
+]
 
 
-class AgendamentoVariavelCreateRequest(BaseModel):
-    # Cidadão
-    prontuariogapd: Optional[int] = None
-    nome: Optional[str] = Field(default=None, max_length=150)
-    telefone: str = Field(..., max_length=50)
-    cpf: Optional[str] = Field(default=None, max_length=14)
+# ==========================================================
+# REQUEST
+# ==========================================================
 
-    # Serviço
-    servico_id: Optional[int] = None
-    servicoespecializado: Optional[str] = Field(default=None, max_length=120)
-    permite_agente_ia: bool = False
+class AgendamentoRequest(BaseModel):
+    """
+    Payload único da API de agendamento.
 
-    # Preferências (variável)
-    #data_preferencia_inicio: Optional[str] = None  # "YYYY-MM-DD"
-    #data_preferencia_fim: Optional[str] = None     # "YYYY-MM-DD"
-    data_preferencia_inicio: Optional[datetime] = None
-    data_preferencia_fim: Optional[datetime] = None
-    diasemana: Optional[int] = Field(default=None, ge=0, le=6)
-    periodo_preferencial: PeriodoPreferencial = None
+    Esta API NÃO localiza o cidadão do zero.
+    Ela pressupõe que uma etapa anterior já identificou o cidadão
+    por telefone, CPF ou prontuário, validou a elegibilidade
+    e retornou uma notificação-base confiável.
 
-    # Transporte (quando aplicável)
-    origem: Optional[str] = Field(default=None, max_length=80)
-    destino: Optional[str] = Field(default=None, max_length=80)
+    O campo id_notificacao_base representa essa notificação-base.
+    Quando o fluxo exigir registro, a API cria uma NOVA linha
+    em notificacao para a solicitação ou para o agendamento confirmado.
+    """
 
-    # Rastreabilidade / idempotência
-    canal: str = Field(default="WHATSAPP", max_length=20)
-    solicitado_por: str = Field(default="AGENTE_IA", max_length=50)
-    conversa_id: Optional[str] = Field(default=None, max_length=80)
-    mensagem_id: Optional[str] = Field(default=None, max_length=80)
-   
-    # Outros
-    observacao: Optional[str] = None
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "id_notificacao_base": 10,
+                    "servicoespecializado": "TRANSPORTE",
+                    "data_preferencia": "2026-03-20",
+                    "hora_preferencia": "09:00",
+                    "origem": "Residência",
+                    "destino": "Hospital Municipal",
+                    "observacaonotificacao": "Solicitação recebida via WhatsApp"
+                },
+                {
+                    "id_notificacao_base": 20,
+                    "servicoespecializado": "FISIOTERAPIA",
+                    "data_preferencia": "2026-03-20",
+                    "hora_preferencia": "08:00",
+                    "observacaonotificacao": "Buscar disponibilidade para fisioterapia"
+                },
+                {
+                    "id_notificacao_base": 20,
+                    "servicoespecializado": "FISIOTERAPIA",
+                    "data_preferencia": "2026-03-20",
+                    "hora_preferencia": "08:00",
+                    "id_slot": 5,
+                    "observacaonotificacao": "Cidadão escolheu a opção apresentada"
+                }
+            ]
+        }
+    )
+
+    id_notificacao_base: int = Field(
+        ...,
+        description=(
+            "Identificador obrigatório da notificação-base previamente localizada "
+            "pela etapa de identificação do cidadão. Sem esse identificador, "
+            "o fluxo de agendamento não deve ser iniciado."
+        )
+    )
+
+    servicoespecializado: Optional[str] = Field(
+        default=None,
+        description=(
+            "Serviço solicitado para o novo agendamento. "
+            "Quando não informado, a API tentará usar o serviço disponível na notificação-base."
+        )
+    )
+
+    dataagendamento: Optional[date] = Field(
+        default=None,
+        description=(
+            "Data efetivamente confirmada para o agendamento. "
+            "Esse campo deve ser preenchido apenas quando houver confirmação real do agendamento. "
+            "No fluxo conversacional normal, o agente não precisa enviá-lo para solicitar atendimento."
+        )
+    )
+
+    horaagendamento: Optional[str] = Field(
+        default=None,
+        description=(
+            "Hora efetivamente confirmada para o agendamento no formato HH:MM. "
+            "Esse campo deve ser preenchido apenas quando houver confirmação real do agendamento."
+        ),
+        examples=["08:00", "09:30"],
+        pattern=r"^\d{2}:\d{2}$"
+    )
+
+    data_preferencia: Optional[date] = Field(
+        default=None,
+        description=(
+            "Data de preferência informada pelo cidadão para o atendimento. "
+            "É usada para registrar a solicitação e para consulta de disponibilidade em slot_fixo."
+        )
+    )
+
+    hora_preferencia: Optional[str] = Field(
+        default=None,
+        description=(
+            "Hora de preferência informada pelo cidadão no formato HH:MM. "
+            "É usada para registrar a solicitação e pode servir como filtro preferencial em slot_fixo."
+        ),
+        examples=["08:00", "09:30"],
+        pattern=r"^\d{2}:\d{2}$"
+    )
+
+    data_solicitacao: Optional[datetime] = Field(
+        default=None,
+        description=(
+            "Data e hora em que a solicitação foi formalmente registrada. "
+            "Quando não informada, a API assume o momento atual."
+        )
+    )
+
+    data_autorizacao: Optional[datetime] = Field(
+        default=None,
+        description=(
+            "Data e hora da autorização da solicitação, quando aplicável."
+        )
+    )
+
+    origem: Optional[str] = Field(
+        default=None,
+        description="Origem informada para o atendimento/agendamento, quando aplicável."
+    )
+
+    destino: Optional[str] = Field(
+        default=None,
+        description="Destino informado para o atendimento/agendamento, quando aplicável."
+    )
+
+    id_slot: Optional[int] = Field(
+        default=None,
+        description=(
+            "Identificador do slot escolhido pelo cidadão. "
+            "Deve ser enviado apenas quando o serviço for do tipo slot_fixo "
+            "e o cidadão já tiver selecionado uma opção devolvida pela API."
+        )
+    )
+
+    observacaonotificacao: Optional[str] = Field(
+        default=None,
+        description="Observação complementar para registro operacional."
+    )
+
+
+# ==========================================================
+# RESPONSE
+# ==========================================================
+
+class OpcaoDisponivelResponse(BaseModel):
+    id_slot: int = Field(..., description="Identificador único do slot disponível.")
+    dataagendamento: date = Field(..., description="Data disponível para o agendamento.")
+    horaagendamento: str = Field(..., description="Horário disponível no formato HH:MM.")
+    unidade: Optional[str] = Field(default=None, description="Unidade de atendimento do slot.")
+    servicoespecializado: str = Field(..., description="Serviço associado ao slot.")
+
+
+class DadosRetornoAgendamentoResponse(BaseModel):
+    id_notificacao_base: Optional[int] = Field(default=None, description="ID da notificação-base consultada.")
+    id_notificacao_agendamento: Optional[int] = Field(default=None, description="ID da nova notificação criada para a solicitação ou para o agendamento.")
+    tipoagenda: Optional[TipoAgenda] = Field(default=None, description="Tipo de agenda associado ao serviço.")
+    situacaonotificacao: Optional[str] = Field(default=None, description="Situação atual registrada na nova notificação.")
+    status_agenda: Optional[StatusAgenda] = Field(default=None, description="Estado atual da solicitação/agendamento.")
+    dataagendamento: Optional[date] = Field(default=None, description="Data efetivamente confirmada para o agendamento, quando houver.")
+    horaagendamento: Optional[str] = Field(default=None, description="Hora efetivamente confirmada para o agendamento, quando houver.")
+    data_preferencia: Optional[date] = Field(default=None, description="Data de preferência informada pelo cidadão.")
+    hora_preferencia: Optional[str] = Field(default=None, description="Hora de preferência informada pelo cidadão no formato HH:MM.")
+    data_solicitacao: Optional[datetime] = Field(default=None, description="Data e hora da solicitação.")
+    data_autorizacao: Optional[datetime] = Field(default=None, description="Data e hora da autorização, quando houver.")
+    origem: Optional[str] = Field(default=None, description="Origem registrada.")
+    destino: Optional[str] = Field(default=None, description="Destino registrado.")
+    id_slot: Optional[int] = Field(default=None, description="Slot efetivamente reservado, se houver.")
+    opcoes_disponiveis: Optional[List[OpcaoDisponivelResponse]] = Field(
+        default=None,
+        description="Lista de opções disponíveis para o cidadão escolher."
+    )
+    campos_pendentes: Optional[List[str]] = Field(
+        default=None,
+        description="Lista de campos obrigatórios faltantes para o fluxo continuar."
+    )
 
 
 class AgendamentoResponse(BaseModel):
-    id_agendamento: int
-    tipo_agendamento: TipoAgendamento
-    status: StatusAgendamento
-    motivo_status: Optional[str] = None
-    status_atualizado_em: Optional[datetime] = None
-
-    # Datas efetivas (podem ser null no variavel)
-    #inicio_em: Optional[str] = None
-    #fim_em: Optional[str] = None
-    inicio_em: Optional[datetime] = None
-    fim_em: Optional[datetime] = None
-
-    # Preferências
-    #data_preferencia_inicio: Optional[str] = None
-    #data_preferencia_fim: Optional[str] = None
-    data_agendamento: Optional[datetime] = None
-    data_preferencia_inicio: Optional[datetime] = None
-    data_preferencia_fim: Optional[datetime] = None
-    diasemana: Optional[int] = None
-    periodo_preferencial: PeriodoPreferencial = None
-
-    # Cidadão
-    prontuariogapd: Optional[int] = None
-    nome: Optional[str] = None
-    telefone: Optional[str] = None
-    cpf: Optional[str] = None
-
-    # Serviço
-    servico_id: Optional[int] = None
-    servicoespecializado: Optional[str] = None
-    permite_agente_ia: bool
-
-    # Transporte
-    origem: Optional[str] = None
-    destino: Optional[str] = None
-
-    # Rastreabilidade
-    canal: str
-    solicitado_por: str
-    conversa_id: Optional[str] = None
-    mensagem_id: Optional[str] = None
-
-    observacao: Optional[str] = None
-    ativo: bool
+    sucesso: bool = Field(..., description="Indica se a solicitação foi tratada corretamente pela API.")
+    proxima_acao: ProximaAcao = Field(
+        ...,
+        description="Orienta explicitamente o próximo passo do agente."
+    )
+    mensagem: str = Field(..., description="Mensagem descritiva do resultado.")
+    dados: DadosRetornoAgendamentoResponse = Field(
+        ...,
+        description="Dados estruturados para apoiar a continuação do fluxo conversacional."
+    )

@@ -4,105 +4,422 @@ from psycopg2.extras import RealDictCursor
 from app.core.config import settings
 
 
-def buscar_agendamento_por_prontuario(prontuariogapd: int):
-    conn = psycopg2.connect(settings.POSTGRES_DSN)
-    try:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(
-                """
-                SELECT *
-                FROM agendamento
-                WHERE prontuariogapd = %s
-                AND inicio_em >= CURRENT_DATE;
-                """,
-                (prontuariogapd,),
-            )
-            return cur.fetchall()
-    finally:
-        conn.close()
+# ==========================================================
+# BUSCA DA NOTIFICAÇÃO BASE
+# ==========================================================
 
-def buscar_agendamento_por_id(id_agendamento: int):
+def buscar_notificacao_por_id(id_notificacao: int):
+    """
+    Busca a notificação base usada para obter os dados do cidadão
+    e demais informações de contexto disponíveis nesta POC.
+    """
     conn = psycopg2.connect(settings.POSTGRES_DSN)
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
-                SELECT *
-                FROM agendamento
-                WHERE id_agendamento = %s
+                SELECT
+                    id_notificacao,
+                    dataagendamento,
+                    horaagendamento,
+                    prontuariogapd,
+                    nome,
+                    telefone,
+                    servicoespecializado,
+                    origem,
+                    destino,
+                    situacaonotificacao,
+                    datanotificacao,
+                    observacaonotificacao,
+                    situacaoresposta,
+                    dataresposta,
+                    observacaoresposta,
+                    tipoagenda,
+                    status_agenda,
+                    data_preferencia,
+                    hora_preferencia,
+                    data_solicitacao,
+                    data_autorizacao
+                FROM notificacao
+                WHERE id_notificacao = %s
                 """,
-                (id_agendamento,),
+                (id_notificacao,)
             )
             return cur.fetchone()
     finally:
         conn.close()
 
 
-def inserir_agendamento_variavel(dados: dict):
+# ==========================================================
+# CONSULTA DE DISPONIBILIDADE PARA SLOT FIXO
+# ==========================================================
+
+def buscar_slots_disponiveis(
+    servicoespecializado: str,
+    dataagendamento,
+    horaagendamento: str | None = None
+):
     """
-    Insere um agendamento do tipo VARIAVEL.
-    Retorna o registro inserido.
+    Busca slots disponíveis para o serviço e data informados.
+    Se horaagendamento for informada, tenta o horário exato.
     """
     conn = psycopg2.connect(settings.POSTGRES_DSN)
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
-                INSERT INTO agendamento
-                (
-                    tipo_agendamento, status, motivo_status, status_atualizado_em,
-                    data_preferencia_inicio, data_preferencia_fim, diasemana, periodo_preferencial,
-                    prontuariogapd, nome, telefone, cpf,
-                    servico_id, servicoespecializado, permite_agente_ia,
-                    canal, solicitado_por, conversa_id, mensagem_id, data_agendamento,
-                    origem, destino,
-                    observacao, ativo
-                )
-                VALUES
-                (
-                    %(tipo_agendamento)s, %(status)s, %(motivo_status)s, %(status_atualizado_em)s,
-                    %(data_preferencia_inicio)s, %(data_preferencia_fim)s, %(diasemana)s, %(periodo_preferencial)s,
-                    %(prontuariogapd)s, %(nome)s, %(telefone)s, %(cpf)s,
-                    %(servico_id)s, %(servicoespecializado)s, %(permite_agente_ia)s,
-                    %(canal)s, %(solicitado_por)s, %(conversa_id)s, %(mensagem_id)s, %(data_agendamento)s, 
-                    %(origem)s, %(destino)s,
-                    %(observacao)s, %(ativo)s
-                )
-                RETURNING *
+                SELECT
+                    id_slot,
+                    servicoespecializado,
+                    dataagenda,
+                    horaagenda,
+                    unidade,
+                    situacao
+                FROM agenda_slot_fixo
+                WHERE servicoespecializado = %s
+                  AND dataagenda = %s
+                  AND (%s IS NULL OR horaagenda = %s)
+                  AND situacao = 'DISPONIVEL'
+                ORDER BY horaagenda
                 """,
-                dados,
+                (servicoespecializado, dataagendamento, horaagendamento, horaagendamento)
             )
-            row = cur.fetchone()
-            conn.commit()
-            return row
-    except:
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def buscar_slots_alternativos(
+    servicoespecializado: str,
+    dataagendamento,
+    horaagendamento: str | None = None,
+    limite: int = 5
+):
+    """
+    Busca alternativas quando não houver vaga exata.
+    """
+    conn = psycopg2.connect(settings.POSTGRES_DSN)
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT
+                    id_slot,
+                    servicoespecializado,
+                    dataagenda,
+                    horaagenda,
+                    unidade,
+                    situacao
+                FROM agenda_slot_fixo
+                WHERE servicoespecializado = %s
+                  AND dataagenda >= %s
+                  AND situacao = 'DISPONIVEL'
+                  AND NOT (
+                        dataagenda = %s
+                    AND (%s IS NULL OR horaagenda = %s)
+                  )
+                ORDER BY dataagenda, horaagenda
+                LIMIT %s
+                """,
+                (
+                    servicoespecializado,
+                    dataagendamento,
+                    dataagendamento,
+                    horaagendamento,
+                    horaagendamento,
+                    limite
+                )
+            )
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
+# ==========================================================
+# INSERÇÃO DE NOVO REGISTRO EM NOTIFICACAO
+# ==========================================================
+
+def inserir_notificacao_agendamento(
+    notificacao_base: dict,
+    servicoespecializado: str,
+    tipoagenda: str,
+    origem: str | None,
+    destino: str | None,
+    dataagendamento,
+    horaagendamento: str | None,
+    situacaonotificacao: str,
+    observacaonotificacao: str | None,
+    status_agenda: str | None,
+    data_preferencia=None,
+    hora_preferencia: str | None = None,
+    data_solicitacao=None,
+    data_autorizacao=None
+):
+    """
+    Insere um novo registro em notificacao copiando os dados do cidadão
+    da notificação base e gravando os dados da nova solicitação/agendamento.
+
+    Regras:
+    - data_preferencia/hora_preferencia representam a intenção do cidadão.
+    - dataagendamento/horaagendamento representam confirmação efetiva.
+    - quando houver apenas solicitação, dataagendamento/horaagendamento devem permanecer nulos.
+    """
+    conn = psycopg2.connect(settings.POSTGRES_DSN)
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                INSERT INTO notificacao (
+                    dataagendamento,
+                    horaagendamento,
+                    prontuariogapd,
+                    nome,
+                    telefone,
+                    servicoespecializado,
+                    origem,
+                    destino,
+                    situacaonotificacao,
+                    datanotificacao,
+                    observacaonotificacao,
+                    situacaoresposta,
+                    dataresposta,
+                    observacaoresposta,
+                    tipoagenda,
+                    status_agenda,
+                    data_preferencia,
+                    hora_preferencia,
+                    data_solicitacao,
+                    data_autorizacao
+                )
+                VALUES (
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    NOW(),
+                    %s,
+                    NULL,
+                    NULL,
+                    NULL,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    COALESCE(%s, NOW()),
+                    %s
+                )
+                RETURNING
+                    id_notificacao,
+                    dataagendamento,
+                    horaagendamento,
+                    prontuariogapd,
+                    nome,
+                    telefone,
+                    servicoespecializado,
+                    origem,
+                    destino,
+                    situacaonotificacao,
+                    observacaonotificacao,
+                    tipoagenda,
+                    status_agenda,
+                    data_preferencia,
+                    hora_preferencia,
+                    data_solicitacao,
+                    data_autorizacao
+                """,
+                (
+                    dataagendamento,
+                    horaagendamento,
+                    notificacao_base.get("prontuariogapd"),
+                    notificacao_base.get("nome"),
+                    notificacao_base.get("telefone"),
+                    servicoespecializado,
+                    origem,
+                    destino,
+                    situacaonotificacao,
+                    observacaonotificacao,
+                    tipoagenda,
+                    status_agenda,
+                    data_preferencia,
+                    hora_preferencia,
+                    data_solicitacao,
+                    data_autorizacao
+                )
+            )
+            registro = cur.fetchone()
+        conn.commit()
+        return registro
+    except Exception:
         conn.rollback()
         raise
     finally:
         conn.close()
 
 
-def atualizar_status_agendamento(id_agendamento: int, status: str, motivo_status: str | None = None):
+# ==========================================================
+# CONCLUSÃO DE AGENDAMENTO SLOT FIXO
+# ==========================================================
+
+def registrar_agendamento_slot_fixo(
+    notificacao_base: dict,
+    id_slot: int,
+    servicoespecializado: str,
+    tipoagenda: str,
+    origem: str | None,
+    destino: str | None,
+    observacaonotificacao: str | None,
+    data_preferencia=None,
+    hora_preferencia: str | None = None,
+    data_solicitacao=None,
+    data_autorizacao=None
+):
+    """
+    Efetiva o agendamento de um serviço do tipo slot_fixo.
+
+    Fluxo:
+    1. valida o slot;
+    2. insere um novo registro em notificacao;
+    3. vincula o slot à nova notificação;
+    4. muda a situação do slot para RESERVADO.
+
+    Aqui, diferentemente da mera solicitação, dataagendamento e horaagendamento
+    são preenchidos com os valores efetivamente confirmados no slot.
+    """
     conn = psycopg2.connect(settings.POSTGRES_DSN)
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
-                UPDATE agendamento
-                SET
-                    status = %s,
-                    motivo_status = %s,
-                    status_atualizado_em = now(),
-                    atualizado_em = now()
-                WHERE id_agendamento = %s
-                RETURNING *
+                SELECT
+                    id_slot,
+                    servicoespecializado,
+                    dataagenda,
+                    horaagenda,
+                    unidade,
+                    situacao,
+                    id_notificacao
+                FROM agenda_slot_fixo
+                WHERE id_slot = %s
+                FOR UPDATE
                 """,
-                (status, motivo_status, id_agendamento),
+                (id_slot,)
             )
-            row = cur.fetchone()
-            conn.commit()
-            return row
-    except:
+            slot = cur.fetchone()
+
+            if not slot:
+                raise ValueError("Slot não encontrado.")
+
+            if slot["situacao"] != "DISPONIVEL":
+                raise ValueError("O slot informado não está disponível.")
+
+            if slot["servicoespecializado"] != servicoespecializado:
+                raise ValueError("O slot informado não pertence ao serviço solicitado.")
+
+            cur.execute(
+                """
+                INSERT INTO notificacao (
+                    dataagendamento,
+                    horaagendamento,
+                    prontuariogapd,
+                    nome,
+                    telefone,
+                    servicoespecializado,
+                    origem,
+                    destino,
+                    situacaonotificacao,
+                    datanotificacao,
+                    observacaonotificacao,
+                    situacaoresposta,
+                    dataresposta,
+                    observacaoresposta,
+                    tipoagenda,
+                    status_agenda,
+                    data_preferencia,
+                    hora_preferencia,
+                    data_solicitacao,
+                    data_autorizacao
+                )
+                VALUES (
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    'AGENDADO',
+                    NOW(),
+                    %s,
+                    NULL,
+                    NULL,
+                    NULL,
+                    %s,
+                    'AGENDADO',
+                    %s,
+                    %s,
+                    COALESCE(%s, NOW()),
+                    %s
+                )
+                RETURNING
+                    id_notificacao,
+                    dataagendamento,
+                    horaagendamento,
+                    situacaonotificacao,
+                    tipoagenda,
+                    servicoespecializado,
+                    origem,
+                    destino,
+                    status_agenda,
+                    data_preferencia,
+                    hora_preferencia,
+                    data_solicitacao,
+                    data_autorizacao
+                """,
+                (
+                    slot["dataagenda"],
+                    slot["horaagenda"],
+                    notificacao_base.get("prontuariogapd"),
+                    notificacao_base.get("nome"),
+                    notificacao_base.get("telefone"),
+                    servicoespecializado,
+                    origem,
+                    destino,
+                    observacaonotificacao,
+                    tipoagenda,
+                    data_preferencia,
+                    hora_preferencia,
+                    data_solicitacao,
+                    data_autorizacao
+                )
+            )
+            nova_notificacao = cur.fetchone()
+
+            cur.execute(
+                """
+                UPDATE agenda_slot_fixo
+                SET
+                    situacao = 'RESERVADO',
+                    id_notificacao = %s,
+                    dataatualizacao = NOW()
+                WHERE id_slot = %s
+                """,
+                (nova_notificacao["id_notificacao"], id_slot)
+            )
+
+        conn.commit()
+
+        return {
+            "notificacao": nova_notificacao,
+            "slot": slot
+        }
+
+    except Exception:
         conn.rollback()
         raise
     finally:
