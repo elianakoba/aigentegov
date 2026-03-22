@@ -20,7 +20,7 @@ from app.routers.consultar_cidadao_atendimento import router as consultar_cidada
 
 # ✅ Agendamentos
 # from app.routers.disponibilidade import router as disponibilidade_router
-#from app.routers.agendamento import router as agendamento_router
+from app.routers.agendamento import router as agendamento_router
 
 
 
@@ -72,6 +72,6 @@ app.include_router(consultar_cidadao_atendimento_router)
 # ---------------------------------------------------
 # ✅ Rotas de Agendamentos (criação/cancelamento etc. - conforme formos evoluindo)
 # ---------------------------------------------------
-#app.include_router(agendamento_router)
+app.include_router(agendamento_router)
 
 
