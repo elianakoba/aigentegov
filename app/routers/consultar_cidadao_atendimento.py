@@ -4,13 +4,13 @@ from app.core.security import validar_api_key
 from app.schemas.consultar_cidadao_atendimento import (
     ConsultarCidadaoAtendimentoRequest,
     ConsultarCidadaoAtendimentoResponse,
-    DadosRetornoConsultarCidadaoAtendimentoResponse
+    DadosRetornoConsultarCidadaoAtendimentoResponse,
+    CidadaoEncontradoOption
 )
 from app.db.consultar_cidadao_atendimento import (
     buscar_cidadao_por_identificadores,
-    buscar_servicos_ja_utilizados_cidadao,
-    buscar_notificacao_base_servico,
-    buscar_ultimo_registro_relevante_cidadao
+    buscar_registro_servico_elegivel_para_continuidade,
+    statusagenda_elegivel_para_continuidade
 )
 
 
@@ -19,12 +19,6 @@ router = APIRouter(
     tags=["Consulta do cidadão para atendimento"],
     dependencies=[Depends(validar_api_key)]
 )
-
-
-def normalizar_servico(valor: str | None) -> str | None:
-    if not valor:
-        return None
-    return valor.strip().upper()
 
 
 def normalizar_texto(valor):
@@ -36,10 +30,11 @@ def normalizar_texto(valor):
 @router.post(
     "",
     response_model=ConsultarCidadaoAtendimentoResponse,
+    response_model_exclude_none=True,
     summary="Consultar cidadão para atendimento",
     description=(
         "API responsável por localizar o cidadão por prontuário GAPD ou telefone "
-        "e retornar informações para apoio ao atendimento.\n\n"
+        "e retornar somente as informações pertinentes ao cenário solicitado.\n\n"
 
         "Campos obrigatórios gerais:\n"
         "- informar pelo menos um identificador: prontuariogapd ou telefone;\n"
@@ -48,19 +43,32 @@ def normalizar_texto(valor):
         "Intenções suportadas:\n\n"
 
         "1. CONSULTAR_DADOS_CIDADAO\n"
-        "   - Objetivo: localizar o cidadão e retornar dados básicos e informações gerais de apoio ao atendimento.\n"
+        "   - Objetivo: localizar o cidadão e retornar apenas sua identificação básica.\n"
         "   - Campos obrigatórios: intencao + (prontuariogapd ou telefone).\n"
         "   - Campo servicoespecializado: não obrigatório.\n\n"
 
         "2. VALIDAR_CONTINUIDADE_ATENDIMENTO\n"
-        "   - Objetivo: verificar se existe histórico suficiente para continuidade do agendamento automático.\n"
+        "   - Objetivo: verificar se existe registro anterior do serviço solicitado "
+        "para o cidadão correto e se o statusagenda desse registro permite continuidade automática.\n"
         "   - Campos obrigatórios: intencao + (prontuariogapd ou telefone) + servicoespecializado.\n\n"
 
+        "Regras de identificação:\n"
+        "- o prontuariogapd é o identificador prioritário quando disponível;\n"
+        "- se a busca for feita apenas por telefone e houver mais de um cidadão vinculado ao número, "
+        "a API retorna SELECIONAR_CIDADAO e apresenta a lista de pessoas encontradas;\n"
+        "- nesse cenário, o agente deve solicitar ao usuário a escolha da pessoa correta antes de prosseguir.\n\n"
+
+        "Regra de continuidade:\n"
+        "- a continuidade automática só é permitida quando existir registro anterior do serviço solicitado "
+        "para o cidadão correto e o statusagenda for elegível;\n"
+        "- nesta versão, apenas statusagenda = AGENDADO é considerado elegível para prosseguir.\n\n"
+
         "Interpretação do campo proxima_acao:\n"
-        "- EXIBIR_DADOS_CIDADAO: cidadão localizado e dados disponíveis para consulta.\n"
-        "- PROSSEGUIR_ATENDIMENTO: continuidade validada com sucesso.\n"
+        "- EXIBIR_DADOS_CIDADAO: cidadão localizado e dados básicos disponíveis para consulta.\n"
+        "- PROSSEGUIR_ATENDIMENTO: continuidade de atendimento validada com sucesso.\n"
         "- INFORMAR_DADOS_OBRIGATORIOS: faltam campos para processar a intenção informada.\n"
-        "- ENCAMINHAR_ATENDENTE_HUMANO: não foi possível automatizar a continuidade do atendimento para agendamento."
+        "- ENCAMINHAR_ATENDENTE_HUMANO: não foi possível automatizar o atendimento.\n"
+        "- SELECIONAR_CIDADAO: foi encontrado mais de um cidadão vinculado ao telefone informado."
     ),
     responses={
         200: {
@@ -81,8 +89,8 @@ def consultar_cidadao_atendimento(
             "consultar_dados_por_telefone": {
                 "summary": "Consultar dados do cidadão por telefone",
                 "description": (
-                    "Use quando o objetivo for localizar o cidadão e obter seus dados "
-                    "básicos para apoio ao atendimento."
+                    "Use quando o objetivo for localizar o cidadão por telefone "
+                    "e obter somente sua identificação básica."
                 ),
                 "value": {
                     "telefone": "(11) 99999-8888",
@@ -94,7 +102,7 @@ def consultar_cidadao_atendimento(
                 "summary": "Consultar dados do cidadão por prontuário",
                 "description": (
                     "Use quando o prontuário GAPD estiver disponível e o objetivo for "
-                    "consultar informações básicas do cidadão."
+                    "consultar apenas a identificação do cidadão."
                 ),
                 "value": {
                     "prontuariogapd": "123456",
@@ -105,8 +113,8 @@ def consultar_cidadao_atendimento(
             "validar_continuidade_sucesso": {
                 "summary": "Validar continuidade do atendimento",
                 "description": (
-                    "Use quando for necessário verificar se existe histórico suficiente "
-                    "para continuidade automática de atendimento de um serviço específico."
+                    "Use quando for necessário verificar se existe registro anterior do "
+                    "serviço solicitado e se o statusagenda permite continuidade automática."
                 ),
                 "value": {
                     "prontuariogapd": "123456",
@@ -141,9 +149,6 @@ def consultar_cidadao_atendimento(
         }
     )
 ):
-    # ======================================================
-    # 1) VALIDA CAMPOS MÍNIMOS
-    # ======================================================
     campos_pendentes = []
 
     if not payload.prontuariogapd and not payload.telefone:
@@ -164,29 +169,20 @@ def consultar_cidadao_atendimento(
             )
         )
 
-    # ======================================================
-    # 2) NORMALIZAÇÃO DEFENSIVA
-    # ======================================================
     prontuariogapd = normalizar_texto(payload.prontuariogapd)
     telefone = normalizar_texto(payload.telefone)
     servicoespecializado = normalizar_texto(payload.servicoespecializado)
 
-    # ======================================================
-    # 3) LOCALIZA O CIDADÃO
-    # ======================================================
-    cidadao = buscar_cidadao_por_identificadores(
+    lista_cidadaos = buscar_cidadao_por_identificadores(
         prontuariogapd=prontuariogapd,
         telefone=telefone
     )
 
-    if not cidadao:
+    if not lista_cidadaos:
         return ConsultarCidadaoAtendimentoResponse(
             sucesso=False,
             proxima_acao="ENCAMINHAR_ATENDENTE_HUMANO",
-            mensagem=(
-                "Não foi localizado cadastro válido do cidadão para continuidade do atendimento. "
-                "O caso deve ser encaminhado ao atendente humano."
-            ),
+            mensagem="Não foi localizado cadastro válido do cidadão.",
             dados=DadosRetornoConsultarCidadaoAtendimentoResponse(
                 cidadao_identificado=False,
                 intencao=payload.intencao,
@@ -194,100 +190,84 @@ def consultar_cidadao_atendimento(
             )
         )
 
-    prontuariogapd_retorno = normalizar_texto(cidadao.get("prontuariogapd"))
-    telefone_retorno = normalizar_texto(cidadao.get("telefone"))
-    nome_retorno = normalizar_texto(cidadao.get("nome"))
+    if not prontuariogapd and len(lista_cidadaos) > 1:
+        return ConsultarCidadaoAtendimentoResponse(
+            sucesso=True,
+            proxima_acao="SELECIONAR_CIDADAO",
+            mensagem="Mais de um cidadão encontrado para este telefone. Selecione para continuar.",
+            dados=DadosRetornoConsultarCidadaoAtendimentoResponse(
+                cidadao_identificado=False,
+                multiplicidade_cidadaos=True,
+                quantidade_cidadaos_encontrados=len(lista_cidadaos),
+                cidadaos_encontrados=[
+                    CidadaoEncontradoOption(**c) for c in lista_cidadaos
+                ],
+                intencao=payload.intencao
+            )
+        )
 
-    # ======================================================
-    # 4) INTENÇÃO: CONSULTAR_DADOS_CIDADAO
-    # ======================================================
+    cidadao = lista_cidadaos[0]
+
+    prontuariogapd_final = normalizar_texto(cidadao.get("prontuariogapd"))
+    telefone_final = normalizar_texto(cidadao.get("telefone"))
+    nome_final = normalizar_texto(cidadao.get("nome"))
+
     if payload.intencao == "CONSULTAR_DADOS_CIDADAO":
-        servicos_ja_utilizados = buscar_servicos_ja_utilizados_cidadao(
-            prontuariogapd=prontuariogapd or prontuariogapd_retorno,
-            telefone=telefone or telefone_retorno
-        )
-
-        ultimo_registro = buscar_ultimo_registro_relevante_cidadao(
-            prontuariogapd=prontuariogapd or prontuariogapd_retorno,
-            telefone=telefone or telefone_retorno
-        )
-
         return ConsultarCidadaoAtendimentoResponse(
             sucesso=True,
             proxima_acao="EXIBIR_DADOS_CIDADAO",
             mensagem="Cidadão localizado com sucesso.",
             dados=DadosRetornoConsultarCidadaoAtendimentoResponse(
                 cidadao_identificado=True,
-                prontuariogapd=prontuariogapd_retorno,
-                nome=nome_retorno,
-                telefone=telefone_retorno,
-                intencao=payload.intencao,
-                servicos_ja_utilizados=servicos_ja_utilizados,
-                ultimo_servicoespecializado=normalizar_texto(ultimo_registro.get("servicoespecializado")) if ultimo_registro else None,
-                ultima_situacaonotificacao=normalizar_texto(ultimo_registro.get("situacaonotificacao")) if ultimo_registro else None,
-                ultimo_statusagenda=normalizar_texto(ultimo_registro.get("statusagenda")) if ultimo_registro else None,
-                continuidade_atendimento=True
+                prontuariogapd=prontuariogapd_final,
+                nome=nome_final,
+                telefone=telefone_final,
+                intencao=payload.intencao
             )
         )
 
-    # ======================================================
-    # 5) INTENÇÃO: VALIDAR_CONTINUIDADE_ATENDIMENTO
-    # ======================================================
-    servicos_ja_utilizados = buscar_servicos_ja_utilizados_cidadao(
-        prontuariogapd=prontuariogapd or prontuariogapd_retorno,
-        telefone=telefone or telefone_retorno
+    registro_servico = buscar_registro_servico_elegivel_para_continuidade(
+        prontuariogapd=prontuariogapd_final,
+        telefone=None,
+        servicoespecializado=servicoespecializado
     )
 
-    servico_solicitado_norm = normalizar_servico(servicoespecializado)
-    servicos_historico_norm = {
-        normalizar_servico(s) for s in servicos_ja_utilizados if s
-    }
-
-    continuidade_atendimento = servico_solicitado_norm in servicos_historico_norm
-
-    if not continuidade_atendimento:
+    if not registro_servico:
         return ConsultarCidadaoAtendimentoResponse(
             sucesso=False,
             proxima_acao="ENCAMINHAR_ATENDENTE_HUMANO",
             mensagem=(
-                "O cidadão foi identificado, porém não há continuidade automática disponível "
-                "para o serviço informado. O caso deve ser encaminhado ao atendente humano."
+                "O cidadão foi identificado, mas não existe registro elegível do serviço informado "
+                "para continuidade automática do atendimento."
             ),
             dados=DadosRetornoConsultarCidadaoAtendimentoResponse(
                 cidadao_identificado=True,
-                prontuariogapd=prontuariogapd_retorno,
-                nome=nome_retorno,
-                telefone=telefone_retorno,
+                prontuariogapd=prontuariogapd_final,
+                nome=nome_final,
+                telefone=telefone_final,
                 intencao=payload.intencao,
                 servicoespecializado=servicoespecializado,
-                servicos_ja_utilizados=servicos_ja_utilizados,
                 continuidade_atendimento=False
             )
         )
 
-    notificacao_base = buscar_notificacao_base_servico(
-        prontuariogapd=prontuariogapd or prontuariogapd_retorno,
-        telefone=telefone or telefone_retorno,
-        servicoespecializado=servicoespecializado
-    )
+    statusagenda = normalizar_texto(registro_servico.get("statusagenda"))
 
-    if not notificacao_base:
+    if not statusagenda_elegivel_para_continuidade(statusagenda):
         return ConsultarCidadaoAtendimentoResponse(
             sucesso=False,
             proxima_acao="ENCAMINHAR_ATENDENTE_HUMANO",
             mensagem=(
-                "O cidadão foi identificado e possui histórico do serviço, "
-                "mas não foi localizado um registro-base válido para continuidade do atendimento. "
-                "O caso deve ser encaminhado ao atendente humano."
+                "O serviço foi localizado, mas o status atual não permite "
+                "continuidade automática do atendimento."
             ),
             dados=DadosRetornoConsultarCidadaoAtendimentoResponse(
                 cidadao_identificado=True,
-                prontuariogapd=prontuariogapd_retorno,
-                nome=nome_retorno,
-                telefone=telefone_retorno,
+                prontuariogapd=prontuariogapd_final,
+                nome=nome_final,
+                telefone=telefone_final,
                 intencao=payload.intencao,
                 servicoespecializado=servicoespecializado,
-                servicos_ja_utilizados=servicos_ja_utilizados,
                 continuidade_atendimento=False
             )
         )
@@ -295,17 +275,16 @@ def consultar_cidadao_atendimento(
     return ConsultarCidadaoAtendimentoResponse(
         sucesso=True,
         proxima_acao="PROSSEGUIR_ATENDIMENTO",
-        mensagem="Cidadão localizado e continuidade de atendimento validada com sucesso.",
+        mensagem="Continuidade validada com sucesso.",
         dados=DadosRetornoConsultarCidadaoAtendimentoResponse(
             cidadao_identificado=True,
-            prontuariogapd=normalizar_texto(notificacao_base.get("prontuariogapd")),
-            nome=normalizar_texto(notificacao_base.get("nome")),
-            telefone=normalizar_texto(notificacao_base.get("telefone")),
+            prontuariogapd=prontuariogapd_final,
+            nome=nome_final,
+            telefone=telefone_final,
             intencao=payload.intencao,
             servicoespecializado=servicoespecializado,
-            servicos_ja_utilizados=servicos_ja_utilizados,
             continuidade_atendimento=True,
-            id_notificacao_base=notificacao_base["id_notificacao"],
-            tipoagenda=normalizar_texto(notificacao_base.get("tipoagenda"))
+            id_notificacao_base=registro_servico["id_notificacao"],
+            tipoagenda=normalizar_texto(registro_servico.get("tipoagenda"))
         )
     )

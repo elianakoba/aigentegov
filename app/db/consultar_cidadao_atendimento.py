@@ -6,6 +6,13 @@ from app.core.config import settings
 
 
 # ==========================================================
+# CONFIGURAÇÃO DE STATUS ELEGÍVEIS
+# ==========================================================
+
+STATUS_ELEGIVEIS_CONTINUIDADE = {"AGENDADO"}
+
+
+# ==========================================================
 # NORMALIZAÇÃO
 # ==========================================================
 
@@ -22,6 +29,42 @@ def normalizar_servico(valor: str | None) -> str | None:
     return valor.strip().upper()
 
 
+def normalizar_texto(valor: str | None) -> str | None:
+    if valor is None:
+        return None
+    valor = str(valor).strip()
+    return valor or None
+
+
+# ==========================================================
+# FILTRO DE IDENTIFICAÇÃO PRIORITÁRIO
+# ==========================================================
+
+def _montar_filtro_identificacao_prioritario(
+    prontuariogapd: str | None,
+    telefone: str | None
+):
+    """
+    Regra de identificação:
+
+    - se houver prontuário, usar somente prontuário;
+    - senão, usar telefone.
+
+    Essa estratégia evita misturar registros de pessoas diferentes quando
+    o telefone é compartilhado entre responsável e dependentes.
+    """
+    prontuariogapd_norm = normalizar_texto(prontuariogapd)
+    telefone_norm = normalizar_somente_digitos(telefone)
+
+    if prontuariogapd_norm:
+        return "prontuariogapd = %s", [prontuariogapd_norm]
+
+    if telefone_norm:
+        return "regexp_replace(COALESCE(telefone, ''), '\\D', '', 'g') = %s", [telefone_norm]
+
+    return None, []
+
+
 # ==========================================================
 # LOCALIZAÇÃO DO CIDADÃO
 # ==========================================================
@@ -31,30 +74,21 @@ def buscar_cidadao_por_identificadores(
     telefone: str | None
 ):
     """
-    Localiza o cidadão na tabela notificacao com base em:
-    - prontuário
-    - telefone
+    Localiza cidadãos distintos.
 
-    Estratégia:
-    - usa os identificadores fornecidos para encontrar um registro confiável;
-    - retorna o registro mais recente encontrado.
+    Regras:
+    - prontuário é identificador prioritário;
+    - telefone só é usado quando não houver prontuário;
+    - se houver telefone compartilhado, pode retornar múltiplos cidadãos;
+    - deduplicação prioriza prontuariogapd e usa nome como fallback.
     """
-    prontuariogapd_norm = prontuariogapd.strip() if prontuariogapd else None
-    telefone_norm = normalizar_somente_digitos(telefone)
+    filtro_sql, params = _montar_filtro_identificacao_prioritario(
+        prontuariogapd=prontuariogapd,
+        telefone=telefone
+    )
 
-    filtros = []
-    params = []
-
-    if prontuariogapd_norm:
-        filtros.append("prontuariogapd = %s")
-        params.append(prontuariogapd_norm)
-
-    if telefone_norm:
-        filtros.append("regexp_replace(COALESCE(telefone, ''), '\\D', '', 'g') = %s")
-        params.append(telefone_norm)
-
-    if not filtros:
-        return None
+    if not filtro_sql:
+        return []
 
     query = f"""
         SELECT
@@ -62,65 +96,10 @@ def buscar_cidadao_por_identificadores(
             prontuariogapd,
             nome,
             telefone,
-            servicoespecializado,
-            tipoagenda,
             datanotificacao
         FROM notificacao
-        WHERE {" OR ".join(filtros)}
+        WHERE {filtro_sql}
         ORDER BY datanotificacao DESC NULLS LAST, id_notificacao DESC
-        LIMIT 1
-    """
-
-    conn = psycopg2.connect(settings.POSTGRES_DSN)
-    try:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(query, params)
-            return cur.fetchone()
-    finally:
-        conn.close()
-
-
-# ==========================================================
-# HISTÓRICO DE SERVIÇOS DO CIDADÃO
-# ==========================================================
-
-def buscar_servicos_ja_utilizados_cidadao(
-    prontuariogapd: str | None,
-    telefone: str | None
-) -> list[str]:
-    """
-    Retorna a lista de serviços já utilizados pelo cidadão.
-
-    Nesta POC, usa a própria tabela notificacao como base histórica.
-    """
-    prontuariogapd_norm = prontuariogapd.strip() if prontuariogapd else None
-    telefone_norm = normalizar_somente_digitos(telefone)
-
-    filtros = []
-    params = []
-
-    if prontuariogapd_norm:
-        filtros.append("prontuariogapd = %s")
-        params.append(prontuariogapd_norm)
-
-    if telefone_norm:
-        filtros.append("regexp_replace(COALESCE(telefone, ''), '\\D', '', 'g') = %s")
-        params.append(telefone_norm)
-
-    if not filtros:
-        return []
-
-    query = f"""
-        SELECT DISTINCT servicoespecializado
-        FROM notificacao
-        WHERE servicoespecializado IS NOT NULL
-          AND ({' OR '.join(filtros)})
-          AND COALESCE(statusagenda, '') IN (
-                'AGENDADO',
-                'AUTORIZADO',
-                'CONCLUIDO'
-          )
-        ORDER BY servicoespecializado
     """
 
     conn = psycopg2.connect(settings.POSTGRES_DSN)
@@ -128,97 +107,51 @@ def buscar_servicos_ja_utilizados_cidadao(
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(query, params)
             registros = cur.fetchall()
-            return [r["servicoespecializado"] for r in registros if r.get("servicoespecializado")]
+
+            cidadaos_unicos = {}
+            for r in registros:
+                chave = normalizar_texto(r.get("prontuariogapd")) or normalizar_texto(r.get("nome"))
+                if chave and chave not in cidadaos_unicos:
+                    cidadaos_unicos[chave] = {
+                        "prontuariogapd": normalizar_texto(r.get("prontuariogapd")),
+                        "nome": normalizar_texto(r.get("nome")),
+                        "telefone": normalizar_texto(r.get("telefone"))
+                    }
+
+            return list(cidadaos_unicos.values())
     finally:
         conn.close()
 
 
 # ==========================================================
-# ÚLTIMO REGISTRO RELEVANTE DO CIDADÃO
+# REGISTRO ELEGÍVEL DO SERVIÇO SOLICITADO
 # ==========================================================
 
-def buscar_ultimo_registro_relevante_cidadao(
-    prontuariogapd: str | None,
-    telefone: str | None
-):
-    """
-    Busca o registro mais recente do cidadão na tabela notificacao.
-    Pode ser usado para apoio ao atendimento quando a intenção for
-    apenas consultar dados gerais do cidadão.
-    """
-    prontuariogapd_norm = prontuariogapd.strip() if prontuariogapd else None
-    telefone_norm = normalizar_somente_digitos(telefone)
-
-    filtros = []
-    params = []
-
-    if prontuariogapd_norm:
-        filtros.append("prontuariogapd = %s")
-        params.append(prontuariogapd_norm)
-
-    if telefone_norm:
-        filtros.append("regexp_replace(COALESCE(telefone, ''), '\\D', '', 'g') = %s")
-        params.append(telefone_norm)
-
-    if not filtros:
-        return None
-
-    query = f"""
-        SELECT
-            id_notificacao,
-            servicoespecializado,
-            tipoagenda,
-            origem,
-            destino,
-            situacaonotificacao,
-            statusagenda,
-            datanotificacao
-        FROM notificacao
-        WHERE {" OR ".join(filtros)}
-        ORDER BY datanotificacao DESC NULLS LAST, id_notificacao DESC
-        LIMIT 1
-    """
-
-    conn = psycopg2.connect(settings.POSTGRES_DSN)
-    try:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(query, params)
-            return cur.fetchone()
-    finally:
-        conn.close()
-
-
-# ==========================================================
-# NOTIFICAÇÃO-BASE DO SERVIÇO SOLICITADO
-# ==========================================================
-
-def buscar_notificacao_base_servico(
+def buscar_registro_servico_elegivel_para_continuidade(
     prontuariogapd: str | None,
     telefone: str | None,
-    servicoespecializado: str
+    servicoespecializado: str | None
 ):
     """
-    Busca a notificação-base mais recente do mesmo serviço solicitado.
+    Busca o registro mais recente do serviço solicitado para o cidadão correto,
+    já filtrando somente registros elegíveis para continuidade automática.
 
-    Essa notificação-base é a melhor candidata para ser usada em fluxos
-    que exigem continuidade de atendimento.
+    Regras:
+    - se houver prontuário, a busca usa somente prontuário;
+    - telefone só é usado quando não houver prontuário;
+    - o serviço deve coincidir exatamente;
+    - nesta versão, somente statusagenda = AGENDADO é elegível.
     """
-    prontuariogapd_norm = prontuariogapd.strip() if prontuariogapd else None
-    telefone_norm = normalizar_somente_digitos(telefone)
     servico_norm = normalizar_servico(servicoespecializado)
+    if not servico_norm:
+        return None
 
-    filtros_identificacao = []
-    params = []
+    filtro_sql, params = _montar_filtro_identificacao_prioritario(
+        prontuariogapd=prontuariogapd,
+        telefone=telefone
+    )
 
-    if prontuariogapd_norm:
-        filtros_identificacao.append("prontuariogapd = %s")
-        params.append(prontuariogapd_norm)
-
-    if telefone_norm:
-        filtros_identificacao.append("regexp_replace(COALESCE(telefone, ''), '\\D', '', 'g') = %s")
-        params.append(telefone_norm)
-
-    if not filtros_identificacao:
+    if not filtro_sql:
         return None
 
     query = f"""
@@ -229,19 +162,13 @@ def buscar_notificacao_base_servico(
             telefone,
             servicoespecializado,
             tipoagenda,
-            origem,
-            destino,
-            datanotificacao,
             situacaonotificacao,
-            statusagenda
+            statusagenda,
+            datanotificacao
         FROM notificacao
         WHERE UPPER(TRIM(servicoespecializado)) = %s
-          AND ({' OR '.join(filtros_identificacao)})
-          AND COALESCE(statusagenda, '') IN (
-                'AGENDADO',
-                'AUTORIZADO',
-                'CONCLUIDO'
-          )
+          AND UPPER(TRIM(COALESCE(statusagenda, ''))) = 'AGENDADO'
+          AND {filtro_sql}
         ORDER BY datanotificacao DESC NULLS LAST, id_notificacao DESC
         LIMIT 1
     """
@@ -253,3 +180,20 @@ def buscar_notificacao_base_servico(
             return cur.fetchone()
     finally:
         conn.close()
+
+
+# ==========================================================
+# ELEGIBILIDADE DE CONTINUIDADE
+# ==========================================================
+
+def statusagenda_elegivel_para_continuidade(statusagenda: str | None) -> bool:
+    """
+    Verifica se o statusagenda permite continuidade automática.
+
+    Nesta versão:
+    - somente statusagenda = AGENDADO é elegível.
+    """
+    status_norm = normalizar_texto(statusagenda)
+    if not status_norm:
+        return False
+    return status_norm.upper() in STATUS_ELEGIVEIS_CONTINUIDADE
