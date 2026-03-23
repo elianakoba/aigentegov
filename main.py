@@ -22,7 +22,7 @@ from app.routers.consultar_cidadao_atendimento import router as consultar_cidada
 # from app.routers.disponibilidade import router as disponibilidade_router
 from app.routers.agendamento import router as agendamento_router
 
-
+from app.routers.consultar_agendamento import router as consultar_agendamento_router
 
 # Validação de ambiente (evita subir "sem config" na AWS/Prod)
 settings.validate_required()
@@ -74,4 +74,7 @@ app.include_router(consultar_cidadao_atendimento_router)
 # ---------------------------------------------------
 app.include_router(agendamento_router)
 
-
+# ---------------------------------------------------
+# ✅ Rotas para consulta de agendamento do cidadão
+# ---------------------------------------------------
+app.include_router(consultar_agendamento_router)
