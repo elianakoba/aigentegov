@@ -5,21 +5,21 @@ from pydantic import BaseModel
 
 class NotificacaoResponse(BaseModel):
     id_notificacao: int
-    dataagendamento: Optional[date]
-    horaagendamento: Optional[str]
-    prontuariogapd: Optional[int]
-    nome: Optional[str]
-    telefone: Optional[str]
-    servicoespecializado: Optional[str]
-    origem: Optional[str]
-    destino: Optional[str]
-    situacaonotificacao: Optional[str]
-    datanotificacao: Optional[datetime]
-    observacaonotificacao: Optional[str]
-    situacaoresposta: Optional[str]
-    dataresposta: Optional[datetime]
-    observacaoresposta: Optional[str]
+    dataagendamento: Optional[date] = None
+    diadasemanaagendamento: Optional[str] = None
+    horaagendamento: Optional[str] = None
+    prontuariogapd: Optional[int] = None
+    nome: Optional[str] = None
+    telefone: Optional[str] = None
+    servicoespecializado: Optional[str] = None
+    origem: Optional[str] = None
+    destino: Optional[str] = None
+    situacaonotificacao: Optional[str] = None
+    datanotificacao: Optional[datetime] = None
+    observacaonotificacao: Optional[str] = None
+    situacaoresposta: Optional[str] = None
+    dataresposta: Optional[datetime] = None
+    observacaoresposta: Optional[str] = None
 
     class Config:
         from_attributes = True
-

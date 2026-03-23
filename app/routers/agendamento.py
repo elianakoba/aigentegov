@@ -102,7 +102,7 @@ def montar_dados_retorno(
 @router.post(
     "",
     response_model=AgendamentoResponse,
-    summary="Iniciar ou concluir agendamento",
+    summary="Realizar agendamento",
     description=(
         "Endpoint principal para tratamento do fluxo de agendamento. "
         "Esta API pressupõe que o cidadão já foi previamente identificado "

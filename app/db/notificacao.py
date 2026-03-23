@@ -4,10 +4,23 @@ from psycopg2.extras import RealDictCursor
 from app.core.config import settings
 
 
+def obter_dia_semana_portugues(data_agendamento):
+    if not data_agendamento:
+        return None
+
+    dias_semana = {
+        0: "segunda-feira",
+        1: "terça-feira",
+        2: "quarta-feira",
+        3: "quinta-feira",
+        4: "sexta-feira",
+        5: "sábado",
+        6: "domingo"
+    }
+    return dias_semana.get(data_agendamento.weekday())
+
+
 def listar_notificacoes():
-    """
-    Retorna todas as notificações cadastradas.
-    """
     conn = psycopg2.connect(settings.POSTGRES_DSN)
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -30,21 +43,24 @@ def listar_notificacoes():
                     dataresposta,
                     observacaoresposta
                 FROM notificacao
-                Where (situacaonotificacao is null) OR
-	            (situacaonotificacao = 'NOTIFICADO' AND situacaoresposta IS NULL)          
+                WHERE (situacaonotificacao IS NULL)
+                   OR (situacaonotificacao = 'NOTIFICADO' AND situacaoresposta IS NULL)
                 ORDER BY id_notificacao DESC
                 """
             )
-            return cur.fetchall()
+            resultados = cur.fetchall()
+
+            for item in resultados:
+                item["diadasemanaagendamento"] = obter_dia_semana_portugues(
+                    item.get("dataagendamento")
+                )
+
+            return resultados
     finally:
         conn.close()
 
 
 def buscar_notificacao_por_id(id_notificacao: int):
-    """
-    Retorna uma única notificação pelo ID.
-    Usado para confirmação de horário.
-    """
     conn = psycopg2.connect(settings.POSTGRES_DSN)
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -71,6 +87,13 @@ def buscar_notificacao_por_id(id_notificacao: int):
                 """,
                 (id_notificacao,)
             )
-            return cur.fetchone()
+            resultado = cur.fetchone()
+
+            if resultado:
+                resultado["diadasemanaagendamento"] = obter_dia_semana_portugues(
+                    resultado.get("dataagendamento")
+                )
+
+            return resultado
     finally:
         conn.close()
