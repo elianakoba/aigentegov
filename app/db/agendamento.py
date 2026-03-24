@@ -35,11 +35,11 @@ def buscar_notificacao_por_id(id_notificacao: int):
                     dataresposta,
                     observacaoresposta,
                     tipoagenda,
-                    status_agenda,
-                    data_preferencia,
-                    hora_preferencia,
-                    data_solicitacao,
-                    data_autorizacao
+                    statusagenda,
+                    datapreferencia,
+                    horapreferencia,
+                    datasolicitacao,
+                    dataautorizacao
                 FROM notificacao
                 WHERE id_notificacao = %s
                 """,
@@ -149,18 +149,18 @@ def inserir_notificacao_agendamento(
     horaagendamento: str | None,
     situacaonotificacao: str,
     observacaonotificacao: str | None,
-    status_agenda: str | None,
-    data_preferencia=None,
-    hora_preferencia: str | None = None,
-    data_solicitacao=None,
-    data_autorizacao=None
+    statusagenda: str | None,
+    datapreferencia=None,
+    horapreferencia: str | None = None,
+    datasolicitacao=None,
+    dataautorizacao=None
 ):
     """
     Insere um novo registro em notificacao copiando os dados do cidadão
     da notificação base e gravando os dados da nova solicitação/agendamento.
 
     Regras:
-    - data_preferencia/hora_preferencia representam a intenção do cidadão.
+    - datapreferencia/horapreferencia representam a intenção do cidadão.
     - dataagendamento/horaagendamento representam confirmação efetiva.
     - quando houver apenas solicitação, dataagendamento/horaagendamento devem permanecer nulos.
     """
@@ -185,11 +185,11 @@ def inserir_notificacao_agendamento(
                     dataresposta,
                     observacaoresposta,
                     tipoagenda,
-                    status_agenda,
-                    data_preferencia,
-                    hora_preferencia,
-                    data_solicitacao,
-                    data_autorizacao
+                    statusagenda,
+                    datapreferencia,
+                    horapreferencia,
+                    datasolicitacao,
+                    dataautorizacao
                 )
                 VALUES (
                     %s,
@@ -226,11 +226,11 @@ def inserir_notificacao_agendamento(
                     situacaonotificacao,
                     observacaonotificacao,
                     tipoagenda,
-                    status_agenda,
-                    data_preferencia,
-                    hora_preferencia,
-                    data_solicitacao,
-                    data_autorizacao
+                    statusagenda,
+                    datapreferencia,
+                    horapreferencia,
+                    datasolicitacao,
+                    dataautorizacao
                 """,
                 (
                     dataagendamento,
@@ -244,11 +244,11 @@ def inserir_notificacao_agendamento(
                     situacaonotificacao,
                     observacaonotificacao,
                     tipoagenda,
-                    status_agenda,
-                    data_preferencia,
-                    hora_preferencia,
-                    data_solicitacao,
-                    data_autorizacao
+                    statusagenda,
+                    datapreferencia,
+                    horapreferencia,
+                    datasolicitacao,
+                    dataautorizacao
                 )
             )
             registro = cur.fetchone()
@@ -273,10 +273,10 @@ def registrar_agendamento_slot_fixo(
     origem: str | None,
     destino: str | None,
     observacaonotificacao: str | None,
-    data_preferencia=None,
-    hora_preferencia: str | None = None,
-    data_solicitacao=None,
-    data_autorizacao=None
+    datapreferencia=None,
+    horapreferencia: str | None = None,
+    datasolicitacao=None,
+    dataautorizacao=None
 ):
     """
     Efetiva o agendamento de um serviço do tipo slot_fixo.
@@ -338,11 +338,11 @@ def registrar_agendamento_slot_fixo(
                     dataresposta,
                     observacaoresposta,
                     tipoagenda,
-                    status_agenda,
-                    data_preferencia,
-                    hora_preferencia,
-                    data_solicitacao,
-                    data_autorizacao
+                    statusagenda,
+                    datapreferencia,
+                    horapreferencia,
+                    datasolicitacao,
+                    dataautorizacao
                 )
                 VALUES (
                     %s,
@@ -375,11 +375,11 @@ def registrar_agendamento_slot_fixo(
                     servicoespecializado,
                     origem,
                     destino,
-                    status_agenda,
-                    data_preferencia,
-                    hora_preferencia,
-                    data_solicitacao,
-                    data_autorizacao
+                    statusagenda,
+                    datapreferencia,
+                    horapreferencia,
+                    datasolicitacao,
+                    dataautorizacao
                 """,
                 (
                     slot["dataagenda"],
@@ -392,10 +392,10 @@ def registrar_agendamento_slot_fixo(
                     destino,
                     observacaonotificacao,
                     tipoagenda,
-                    data_preferencia,
-                    hora_preferencia,
-                    data_solicitacao,
-                    data_autorizacao
+                    datapreferencia,
+                    horapreferencia,
+                    datasolicitacao,
+                    dataautorizacao
                 )
             )
             nova_notificacao = cur.fetchone()

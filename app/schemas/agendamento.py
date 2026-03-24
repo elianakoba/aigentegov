@@ -43,40 +43,11 @@ class AgendamentoRequest(BaseModel):
     e retornou uma notificação-base confiável.
 
     O campo id_notificacao_base representa essa notificação-base.
-    Quando o fluxo exigir registro, a API cria uma NOVA linha
+    Quando o fluxo exigir registro, a API cria uma nova linha
     em notificacao para a solicitação ou para o agendamento confirmado.
     """
 
-    model_config = ConfigDict(
-        json_schema_extra={
-            "examples": [
-                {
-                    "id_notificacao_base": 10,
-                    "servicoespecializado": "TRANSPORTE",
-                    "data_preferencia": "2026-03-20",
-                    "hora_preferencia": "09:00",
-                    "origem": "Residência",
-                    "destino": "Hospital Municipal",
-                    "observacaonotificacao": "Solicitação recebida via WhatsApp"
-                },
-                {
-                    "id_notificacao_base": 20,
-                    "servicoespecializado": "FISIOTERAPIA",
-                    "data_preferencia": "2026-03-20",
-                    "hora_preferencia": "08:00",
-                    "observacaonotificacao": "Buscar disponibilidade para fisioterapia"
-                },
-                {
-                    "id_notificacao_base": 20,
-                    "servicoespecializado": "FISIOTERAPIA",
-                    "data_preferencia": "2026-03-20",
-                    "hora_preferencia": "08:00",
-                    "id_slot": 5,
-                    "observacaonotificacao": "Cidadão escolheu a opção apresentada"
-                }
-            ]
-        }
-    )
+    model_config = ConfigDict()
 
     id_notificacao_base: int = Field(
         ...,
@@ -114,7 +85,7 @@ class AgendamentoRequest(BaseModel):
         pattern=r"^\d{2}:\d{2}$"
     )
 
-    data_preferencia: Optional[date] = Field(
+    datapreferencia: Optional[date] = Field(
         default=None,
         description=(
             "Data de preferência informada pelo cidadão para o atendimento. "
@@ -122,7 +93,7 @@ class AgendamentoRequest(BaseModel):
         )
     )
 
-    hora_preferencia: Optional[str] = Field(
+    horapreferencia: Optional[str] = Field(
         default=None,
         description=(
             "Hora de preferência informada pelo cidadão no formato HH:MM. "
@@ -132,7 +103,7 @@ class AgendamentoRequest(BaseModel):
         pattern=r"^\d{2}:\d{2}$"
     )
 
-    data_solicitacao: Optional[datetime] = Field(
+    datasolicitacao: Optional[datetime] = Field(
         default=None,
         description=(
             "Data e hora em que a solicitação foi formalmente registrada. "
@@ -140,7 +111,7 @@ class AgendamentoRequest(BaseModel):
         )
     )
 
-    data_autorizacao: Optional[datetime] = Field(
+    dataautorizacao: Optional[datetime] = Field(
         default=None,
         description=(
             "Data e hora da autorização da solicitação, quando aplicável."
@@ -189,13 +160,13 @@ class DadosRetornoAgendamentoResponse(BaseModel):
     id_notificacao_agendamento: Optional[int] = Field(default=None, description="ID da nova notificação criada para a solicitação ou para o agendamento.")
     tipoagenda: Optional[TipoAgenda] = Field(default=None, description="Tipo de agenda associado ao serviço.")
     situacaonotificacao: Optional[str] = Field(default=None, description="Situação atual registrada na nova notificação.")
-    status_agenda: Optional[StatusAgenda] = Field(default=None, description="Estado atual da solicitação/agendamento.")
+    statusagenda: Optional[StatusAgenda] = Field(default=None, description="Estado atual da solicitação/agendamento.")
     dataagendamento: Optional[date] = Field(default=None, description="Data efetivamente confirmada para o agendamento, quando houver.")
     horaagendamento: Optional[str] = Field(default=None, description="Hora efetivamente confirmada para o agendamento, quando houver.")
-    data_preferencia: Optional[date] = Field(default=None, description="Data de preferência informada pelo cidadão.")
-    hora_preferencia: Optional[str] = Field(default=None, description="Hora de preferência informada pelo cidadão no formato HH:MM.")
-    data_solicitacao: Optional[datetime] = Field(default=None, description="Data e hora da solicitação.")
-    data_autorizacao: Optional[datetime] = Field(default=None, description="Data e hora da autorização, quando houver.")
+    datapreferencia: Optional[date] = Field(default=None, description="Data de preferência informada pelo cidadão.")
+    horapreferencia: Optional[str] = Field(default=None, description="Hora de preferência informada pelo cidadão no formato HH:MM.")
+    datasolicitacao: Optional[datetime] = Field(default=None, description="Data e hora da solicitação.")
+    dataautorizacao: Optional[datetime] = Field(default=None, description="Data e hora da autorização, quando houver.")
     origem: Optional[str] = Field(default=None, description="Origem registrada.")
     destino: Optional[str] = Field(default=None, description="Destino registrado.")
     id_slot: Optional[int] = Field(default=None, description="Slot efetivamente reservado, se houver.")

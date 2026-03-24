@@ -1,5 +1,5 @@
 from datetime import time
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, Body
 
 from app.core.security import validar_api_key
 from app.schemas.agendamento import (
@@ -84,13 +84,13 @@ def montar_dados_retorno(
         id_notificacao_agendamento=registro.get("id_notificacao"),
         tipoagenda=registro.get("tipoagenda") or tipoagenda,
         situacaonotificacao=registro.get("situacaonotificacao"),
-        status_agenda=registro.get("status_agenda"),
+        statusagenda=registro.get("statusagenda"),
         dataagendamento=registro.get("dataagendamento"),
         horaagendamento=formatar_hora(registro.get("horaagendamento")),
-        data_preferencia=registro.get("data_preferencia"),
-        hora_preferencia=formatar_hora(registro.get("hora_preferencia")),
-        data_solicitacao=registro.get("data_solicitacao"),
-        data_autorizacao=registro.get("data_autorizacao"),
+        datapreferencia=registro.get("datapreferencia"),
+        horapreferencia=formatar_hora(registro.get("horapreferencia")),
+        datasolicitacao=registro.get("datasolicitacao"),
+        dataautorizacao=registro.get("dataautorizacao"),
         origem=registro.get("origem"),
         destino=registro.get("destino"),
         id_slot=id_slot,
@@ -104,26 +104,162 @@ def montar_dados_retorno(
     response_model=AgendamentoResponse,
     summary="Realizar agendamento",
     description=(
-        "Endpoint principal para tratamento do fluxo de agendamento. "
-        "Esta API pressupõe que o cidadão já foi previamente identificado "
-        "por telefone ou prontuário em uma etapa anterior, e que uma "
-        "notificação-base válida já foi localizada. "
-        "A API consulta essa notificação para obter os dados do cidadão e, "
-        "quando necessário, cria um novo registro para representar "
-        "a solicitação ou o agendamento. "
-        "Para serviços com evento_variavel, registra a solicitação do cidadão. "
-        "Para serviços com slot_fixo, consulta a disponibilidade quando necessário, "
-        "retorna opções ao agente e conclui o agendamento quando um slot é informado. "
-        "Se não existir nenhuma notificação-base válida sobre o serviço, a API orienta "
-        "encaminhamento ao atendente humano. "
-        "Para serviços de transporte, a API registra a solicitação como pendente de aprovação "
-        "e orienta encaminhamento ao atendente humano. "
-        "Na fase de solicitação, os campos data_preferencia e hora_preferencia representam "
-        "o desejo informado pelo cidadão. Os campos dataagendamento e horaagendamento "
-        "devem representar apenas o atendimento efetivamente confirmado."
+        "Endpoint principal do fluxo de agendamento.\n\n"
+        "OBJETIVO:\n"
+        "Esta API trata a solicitação de agendamento a partir de uma notificação-base "
+        "já localizada anteriormente. O cidadão não é identificado aqui do zero. "
+        "A API usa a notificação-base para obter os dados do cidadão e decidir "
+        "como processar o fluxo do serviço.\n\n"
+
+        "REGRAS GERAIS:\n"
+        "1. O campo id_notificacao_base é obrigatório em qualquer chamada.\n"
+        "2. O agente deve sempre chamar esta única rota, sem tentar decidir por conta própria "
+        "se o fluxo é transporte, evento_variavel ou slot_fixo.\n"
+        "3. A API decide internamente o comportamento e devolve a orientação em proxima_acao.\n"
+        "4. datapreferencia e horapreferencia representam a intenção do cidadão.\n"
+        "5. dataagendamento e horaagendamento representam apenas confirmação efetiva do atendimento.\n"
+        "6. id_slot só deve ser enviado quando o serviço for do tipo slot_fixo e a própria API "
+        "já tiver retornado opções para escolha.\n\n"
+
+        "COMPORTAMENTOS POSSÍVEIS:\n"
+        "- Se não existir notificação-base válida: ENCAMINHAR_ATENDENTE_HUMANO.\n"
+        "- Se faltarem dados obrigatórios: INFORMAR_DADOS_OBRIGATORIOS.\n"
+        "- Se for transporte: registra solicitação pendente de aprovação e orienta encaminhamento ao atendente humano.\n"
+        "- Se for evento_variavel: registra a solicitação e retorna AGENDAMENTO_REGISTRADO.\n"
+        "- Se for slot_fixo sem id_slot: consulta disponibilidade e retorna opções ou indisponibilidade.\n"
+        "- Se for slot_fixo com id_slot: conclui o agendamento e retorna AGENDAMENTO_REALIZADO.\n\n"
+
+        "INTERPRETAÇÃO DE proxima_acao:\n"
+        "- AGENDAMENTO_REGISTRADO: solicitação criada com sucesso, sem vaga efetivamente confirmada.\n"
+        "- AGENDAMENTO_REALIZADO: vaga efetivamente reservada.\n"
+        "- SELECIONAR_OPCAO_DISPONIVEL: a API retornou opções e o cidadão deve escolher uma.\n"
+        "- INFORMAR_DADOS_OBRIGATORIOS: faltam campos para continuar.\n"
+        "- SEM_DISPONIBILIDADE: não há vagas compatíveis com os critérios informados.\n"
+        "- ENCAMINHAR_ATENDENTE_HUMANO: o fluxo deve sair do autoatendimento.\n\n"
+
+        "OBSERVAÇÃO IMPORTANTE:\n"
+        "No fluxo conversacional normal, o agente não deve enviar dataagendamento e horaagendamento "
+        "para solicitar atendimento. Deve usar datapreferencia e horapreferencia."
     )
 )
-def criar_agendamento(payload: AgendamentoRequest):
+def criar_agendamento(
+    payload: AgendamentoRequest = Body(
+        ...,
+        openapi_examples={
+            "transporte_completo": {
+                "summary": "Transporte - solicitação completa",
+                "description": (
+                    "Usar quando o serviço for transporte. "
+                    "A API registrará a solicitação como pendente de aprovação "
+                    "e orientará encaminhamento ao atendente humano."
+                ),
+                "value": {
+                    "id_notificacao_base": 10,
+                    "servicoespecializado": "TRANSPORTE",
+                    "datapreferencia": "2026-03-20",
+                    "horapreferencia": "09:00",
+                    "origem": "Residência",
+                    "destino": "Hospital Municipal",
+                    "observacaonotificacao": "Solicitação recebida via WhatsApp"
+                }
+            },
+            "transporte_incompleto": {
+                "summary": "Transporte - faltando dados",
+                "description": (
+                    "Exemplo propositalmente incompleto. "
+                    "A API deverá retornar proxima_acao = INFORMAR_DADOS_OBRIGATORIOS."
+                ),
+                "value": {
+                    "id_notificacao_base": 10,
+                    "servicoespecializado": "TRANSPORTE",
+                    "datapreferencia": "2026-03-20"
+                }
+            },
+            "evento_variavel_completo": {
+                "summary": "Evento variável - solicitação completa",
+                "description": (
+                    "Usar quando o serviço for do tipo evento_variavel. "
+                    "A API registrará a solicitação do cidadão."
+                ),
+                "value": {
+                    "id_notificacao_base": 20,
+                    "servicoespecializado": "FISIOTERAPIA_DOMICILIAR",
+                    "datapreferencia": "2026-03-21",
+                    "horapreferencia": "08:30",
+                    "observacaonotificacao": "Solicitação inicial do cidadão"
+                }
+            },
+            "evento_variavel_herdando_servico": {
+                "summary": "Evento variável - usando serviço da notificação-base",
+                "description": (
+                    "Quando servicoespecializado já estiver presente na notificação-base, "
+                    "o payload pode omitir esse campo."
+                ),
+                "value": {
+                    "id_notificacao_base": 20,
+                    "datapreferencia": "2026-03-21",
+                    "horapreferencia": "08:30",
+                    "observacaonotificacao": "Usar serviço herdado da notificação-base"
+                }
+            },
+            "slot_fixo_consulta_data": {
+                "summary": "Slot fixo - consultar disponibilidade por data",
+                "description": (
+                    "Usar quando o cidadão deseja consultar horários disponíveis "
+                    "para uma determinada data."
+                ),
+                "value": {
+                    "id_notificacao_base": 30,
+                    "servicoespecializado": "FISIOTERAPIA",
+                    "datapreferencia": "2026-03-22",
+                    "observacaonotificacao": "Consultar horários disponíveis"
+                }
+            },
+            "slot_fixo_consulta_data_hora": {
+                "summary": "Slot fixo - consultar disponibilidade por data e hora",
+                "description": (
+                    "Usar quando o cidadão informar uma preferência de data e também de horário. "
+                    "A API tentará encontrar a vaga exata e, se não houver, poderá devolver alternativas."
+                ),
+                "value": {
+                    "id_notificacao_base": 30,
+                    "servicoespecializado": "FISIOTERAPIA",
+                    "datapreferencia": "2026-03-22",
+                    "horapreferencia": "10:00",
+                    "observacaonotificacao": "Cidadão prefere atendimento às 10h"
+                }
+            },
+            "slot_fixo_confirmacao": {
+                "summary": "Slot fixo - confirmar opção escolhida",
+                "description": (
+                    "Usar somente após a API já ter devolvido opções em opcoes_disponiveis "
+                    "e o cidadão ter escolhido uma delas."
+                ),
+                "value": {
+                    "id_notificacao_base": 30,
+                    "servicoespecializado": "FISIOTERAPIA",
+                    "id_slot": 5,
+                    "observacaonotificacao": "Cidadão confirmou a opção escolhida"
+                }
+            },
+            "slot_fixo_confirmacao_com_preferencia": {
+                "summary": "Slot fixo - confirmar opção escolhida com preferência registrada",
+                "description": (
+                    "Também pode ser usado quando se deseja manter, por histórico, "
+                    "a data e hora preferidas originalmente informadas pelo cidadão."
+                ),
+                "value": {
+                    "id_notificacao_base": 30,
+                    "servicoespecializado": "FISIOTERAPIA",
+                    "id_slot": 5,
+                    "datapreferencia": "2026-03-22",
+                    "horapreferencia": "10:00",
+                    "observacaonotificacao": "Confirmar slot escolhido"
+                }
+            }
+        }
+    )
+):
     try:
         # ======================================================
         # 1) CONSULTA A NOTIFICACAO-BASE
@@ -171,11 +307,11 @@ def criar_agendamento(payload: AgendamentoRequest):
         if eh_servico_transporte(servicoespecializado):
             campos_pendentes = []
 
-            if not payload.data_preferencia:
-                campos_pendentes.append("data_preferencia")
+            if not payload.datapreferencia:
+                campos_pendentes.append("datapreferencia")
 
-            if not payload.hora_preferencia:
-                campos_pendentes.append("hora_preferencia")
+            if not payload.horapreferencia:
+                campos_pendentes.append("horapreferencia")
 
             if not payload.origem:
                 campos_pendentes.append("origem")
@@ -208,11 +344,11 @@ def criar_agendamento(payload: AgendamentoRequest):
                 horaagendamento=None,
                 situacaonotificacao="PENDENTE_APROVACAO",
                 observacaonotificacao=payload.observacaonotificacao,
-                status_agenda="SOLICITADO",
-                data_preferencia=payload.data_preferencia,
-                hora_preferencia=payload.hora_preferencia,
-                data_solicitacao=payload.data_solicitacao,
-                data_autorizacao=payload.data_autorizacao
+                statusagenda="SOLICITADO",
+                datapreferencia=payload.datapreferencia,
+                horapreferencia=payload.horapreferencia,
+                datasolicitacao=payload.datasolicitacao,
+                dataautorizacao=payload.dataautorizacao
             )
 
             return AgendamentoResponse(
@@ -234,11 +370,11 @@ def criar_agendamento(payload: AgendamentoRequest):
         if tipoagenda == "evento_variavel":
             campos_pendentes = []
 
-            if not payload.data_preferencia:
-                campos_pendentes.append("data_preferencia")
+            if not payload.datapreferencia:
+                campos_pendentes.append("datapreferencia")
 
-            if not payload.hora_preferencia:
-                campos_pendentes.append("hora_preferencia")
+            if not payload.horapreferencia:
+                campos_pendentes.append("horapreferencia")
 
             if campos_pendentes:
                 return AgendamentoResponse(
@@ -262,11 +398,11 @@ def criar_agendamento(payload: AgendamentoRequest):
                 horaagendamento=None,
                 situacaonotificacao="SOLICITADO",
                 observacaonotificacao=payload.observacaonotificacao,
-                status_agenda="SOLICITADO",
-                data_preferencia=payload.data_preferencia,
-                hora_preferencia=payload.hora_preferencia,
-                data_solicitacao=payload.data_solicitacao,
-                data_autorizacao=payload.data_autorizacao
+                statusagenda="SOLICITADO",
+                datapreferencia=payload.datapreferencia,
+                horapreferencia=payload.horapreferencia,
+                datasolicitacao=payload.datasolicitacao,
+                dataautorizacao=payload.dataautorizacao
             )
 
             return AgendamentoResponse(
@@ -292,10 +428,10 @@ def criar_agendamento(payload: AgendamentoRequest):
                     origem=payload.origem,
                     destino=payload.destino,
                     observacaonotificacao=payload.observacaonotificacao,
-                    data_preferencia=payload.data_preferencia,
-                    hora_preferencia=payload.hora_preferencia,
-                    data_solicitacao=payload.data_solicitacao,
-                    data_autorizacao=payload.data_autorizacao
+                    datapreferencia=payload.datapreferencia,
+                    horapreferencia=payload.horapreferencia,
+                    datasolicitacao=payload.datasolicitacao,
+                    dataautorizacao=payload.dataautorizacao
                 )
 
                 notificacao_agendamento = resultado["notificacao"]
@@ -312,12 +448,12 @@ def criar_agendamento(payload: AgendamentoRequest):
                     )
                 )
 
-            data_consulta = payload.data_preferencia
-            hora_consulta = payload.hora_preferencia
+            data_consulta = payload.datapreferencia
+            hora_consulta = payload.horapreferencia
 
             campos_pendentes = []
             if not data_consulta:
-                campos_pendentes.append("data_preferencia")
+                campos_pendentes.append("datapreferencia")
 
             if campos_pendentes:
                 return AgendamentoResponse(

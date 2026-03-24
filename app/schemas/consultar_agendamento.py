@@ -102,7 +102,7 @@ class AgendamentoLocalizadoResponse(BaseModel):
         default=None,
         description="Situação registrada na notificação."
     )
-    status_agenda: Optional[str] = Field(
+    statusagenda: Optional[str] = Field(
         default=None,
         description="Status operacional do agendamento."
     )

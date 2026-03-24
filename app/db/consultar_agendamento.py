@@ -116,7 +116,7 @@ def buscar_agendamentos_por_prontuario(prontuariogapd: str):
                     dataagendamento,
                     horaagendamento,
                     situacaonotificacao,
-                    status_agenda,
+                    statusagenda,
                     observacaonotificacao,
                     origem,
                     destino
